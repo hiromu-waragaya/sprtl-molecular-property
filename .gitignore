@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+
+# Local QM9 copy (do not commit the CSV)
+data/*.csv
+data/*.csv.gz
+data/*.zip
+
+# Verification / local training outputs (published gold lives under results/alpha_from_gap/)
+_verify/
+results/_verify*/
+results/alpha_soft_gap/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp

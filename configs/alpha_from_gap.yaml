@@ -1,0 +1,12 @@
+# Representative paper setting (alpha <- gap).
+# These values match 5_AllModels_Compare_Run/configs/production_v2.yaml
+# for the alpha_from_gap scenario at the selected lambda.
+
+target: alpha
+source: gap
+lambda: 0.032
+seed: 42
+train_datasize: 200
+epochs: 1000
+lr: 0.01
+sharing_scope: weight_no_output

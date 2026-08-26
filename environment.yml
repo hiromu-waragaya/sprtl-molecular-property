@@ -1,0 +1,32 @@
+# Environment used for the paper runs (conda env name: gpu_test).
+# PyTorch Geometric wheels are CUDA-specific; after creating this env,
+# install the pyg stack to match the versions below if conda cannot resolve them.
+#
+# Verified combination:
+#   python 3.9.23
+#   torch 2.0.1+cu118
+#   torch-geometric 2.3.1
+#   torch-scatter 2.1.1+pt20cu118
+#   torch-sparse 0.6.17+pt20cu118
+#   torch-cluster 1.6.1+pt20cu118
+#   rdkit 2023.03.2
+#   numpy 1.26.4
+#   pandas 2.3.0
+#   scikit-learn 1.6.1
+#   matplotlib 3.7.2
+
+name: sprtl
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9
+  - numpy=1.26.4
+  - pandas=2.3.0
+  - matplotlib=3.7.2
+  - pip
+  - pip:
+      - torch==2.0.1
+      - torchvision==0.15.2
+      - torch-geometric==2.3.1
+      - rdkit==2023.3.2
+      - scikit-learn==1.6.1

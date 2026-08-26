@@ -1,0 +1,188 @@
+# -*- coding: utf-8 -*-
+"""データロード・分割・正規化・Loader 構築の共通実装。
+
+三モデルすべて同一の前処理経路を通すことが、研究上の妥当な比較の前提。
+
+- CSV: ms932 / カンマ区切り (Source Model と整合)。
+- 無効 SMILES があれば除外（valid_df を返す）。
+- 分割: torch.utils.data.random_split を用い、`seed` で完全固定。
+- 正規化: **train 200 のみ** で z-score を計算（情報リーク防止）。
+- y attach: 各 PyG.Data の `.y` に target 値 (shape (1,)) を貼り付ける。
+- DataLoader: train/test とも `drop_last=False` (200 件を全活用するため)。
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import List, Tuple
+
+import numpy as np
+import pandas as pd
+import torch
+from rdkit import Chem
+from torch_geometric.loader import DataLoader
+
+from .graph_featurization import mol2vec
+from .seeding import set_seeds
+
+
+def load_qm9(csv_path: Path) -> Tuple[pd.DataFrame, list]:
+    """QM9 CSV を読み込み、SMILES → Mol → グラフ特徴 (list of PyG.Data) に変換。
+
+    無効 SMILES は除外し、`valid_df` は連番再採番された DataFrame。
+    `all_x[i]` は `valid_df.iloc[i]` と対応する。
+    """
+    df = pd.read_csv(str(csv_path), encoding="ms932", sep=",")
+    if "smiles" not in df.columns:
+        raise ValueError(f"CSV must contain 'smiles' column: {csv_path}")
+
+    valid_rows = []
+    mols = []
+    for _, row in df.iterrows():
+        mol = Chem.MolFromSmiles(str(row["smiles"]))
+        if mol is None:
+            continue
+        valid_rows.append(row)
+        mols.append(mol)
+
+    n_invalid = len(df) - len(mols)
+    if n_invalid:
+        print(f"[data_pipeline] Excluded invalid SMILES: {n_invalid}")
+    valid_df = pd.DataFrame(valid_rows).reset_index(drop=True)
+    print(f"[data_pipeline] Valid molecules: {len(valid_df)} (from {len(df)} rows)")
+
+    print("[data_pipeline] Graph featurization...")
+    all_x = [mol2vec(m) for m in mols]
+    print("[data_pipeline] Graph featurization done.")
+    return valid_df, all_x
+
+
+def build_split(n_all: int, train_datasize: int, seed: int) -> Tuple[List[int], List[int]]:
+    """`torch.utils.data.random_split` ベースで train/test indices を生成。"""
+    if train_datasize < 1 or train_datasize >= n_all:
+        raise ValueError(
+            f"Invalid split: n_all={n_all}, train_datasize={train_datasize}"
+        )
+    indices = list(range(n_all))
+    gen = torch.Generator().manual_seed(int(seed))
+    train_subset, test_subset = torch.utils.data.random_split(
+        indices,
+        lengths=[train_datasize, n_all - train_datasize],
+        generator=gen,
+    )
+    return list(train_subset.indices), list(test_subset.indices)
+
+
+def load_split_json(path: Path) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_split_json(
+    path: Path,
+    *,
+    seed: int,
+    n_all: int,
+    train_datasize: int,
+    train_idx: List[int],
+    test_idx: List[int],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "seed": int(seed),
+                "n_all": int(n_all),
+                "train_datasize": int(train_datasize),
+                "n_test": len(test_idx),
+                "train_idx": list(train_idx),
+                "test_idx": list(test_idx),
+            },
+            f,
+            indent=2,
+        )
+
+
+def get_or_build_split(
+    splits_root: Path,
+    n_all: int,
+    train_datasize: int,
+    seed: int,
+) -> Tuple[List[int], List[int], Path]:
+    """`Shared_Splits/target{N}_seed{S}.json` を読み込む。
+    なければ新規に作成・保存して返す。
+
+    全モデルが同じ JSON を参照するため、(target, model) 間で
+    train_idx / test_idx が完全一致する。
+    """
+    splits_root.mkdir(parents=True, exist_ok=True)
+    path = splits_root / f"target{train_datasize}_seed{seed}.json"
+    if path.is_file():
+        d = load_split_json(path)
+        if d.get("n_all") != n_all or d.get("train_datasize") != train_datasize:
+            raise RuntimeError(
+                f"Existing split JSON inconsistent: {path} "
+                f"(n_all={d.get('n_all')} vs {n_all}, "
+                f"train_datasize={d.get('train_datasize')} vs {train_datasize})"
+            )
+        return list(d["train_idx"]), list(d["test_idx"]), path
+
+    train_idx, test_idx = build_split(n_all, train_datasize, seed)
+    save_split_json(
+        path,
+        seed=seed,
+        n_all=n_all,
+        train_datasize=train_datasize,
+        train_idx=train_idx,
+        test_idx=test_idx,
+    )
+    return train_idx, test_idx, path
+
+
+def compute_norm_params_from_train(y_raw_train: np.ndarray) -> Tuple[float, float]:
+    """train サンプルのみで z-score の mean / std を計算。"""
+    arr = np.asarray(y_raw_train, dtype=float)
+    mean = float(np.mean(arr))
+    std = float(np.std(arr))
+    if std == 0.0:
+        raise ValueError("std is zero on training split.")
+    return mean, std
+
+
+def attach_y_and_build_loaders(
+    all_x: list,
+    y_norm: np.ndarray,
+    train_idx: List[int],
+    test_idx: List[int],
+    seed: int,
+    train_batch_size: int = 32,
+    test_batch_size: int = 4096,
+) -> Tuple[DataLoader, DataLoader]:
+    """`all_x[i].y` に正規化済み target 値を貼り付け、train/test の DataLoader を返す。
+
+    DataLoader は train/test とも `shuffle=True`, `drop_last=False`。
+    DataLoader 構築前後に `set_seeds(seed)` を入れて shuffle 順序を再現可能にする。
+    """
+    set_seeds(seed)
+
+    train_x = []
+    for i in train_idx:
+        g = all_x[i]
+        g.y = torch.FloatTensor([float(y_norm[i])])
+        train_x.append(g)
+
+    test_x = []
+    for i in test_idx:
+        g = all_x[i]
+        g.y = torch.FloatTensor([float(y_norm[i])])
+        test_x.append(g)
+
+    set_seeds(seed)
+    train_loader = DataLoader(
+        train_x, batch_size=train_batch_size, shuffle=True, drop_last=False
+    )
+    set_seeds(seed)
+    test_loader = DataLoader(
+        test_x, batch_size=test_batch_size, shuffle=True, drop_last=False
+    )
+    return train_loader, test_loader

@@ -1,0 +1,17 @@
+{
+  "model": "soft_transfer",
+  "target": "alpha",
+  "auxi": "gap",
+  "seed": 42,
+  "lambda": 0.032,
+  "lr": 0.01,
+  "sharing_scope": "weight_no_output",
+  "run_label": null,
+  "epochs": 1000,
+  "train_datasize": 200,
+  "best_train_mae": 0.9265438914299011,
+  "best_test_mae": 1.623071551322937,
+  "best_test_epoch": 957,
+  "transfer_degree_at_best": 0.9979310030478158,
+  "transfer_degree_shared_scope_at_best": 0.999311963534166
+}

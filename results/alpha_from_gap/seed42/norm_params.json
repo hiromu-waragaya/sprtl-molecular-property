@@ -1,0 +1,12 @@
+{
+  "target": "alpha",
+  "auxi": "gap",
+  "lr": 0.01,
+  "sharing_scope": "weight_no_output",
+  "run_label": null,
+  "mean": 75.433,
+  "std": 8.193016294381454,
+  "n_train": 200,
+  "scope": "train_only",
+  "source_path": "/home/waragaya/260519_Paper_Summary/Transfer_Params/gap_source_model_state.pth"
+}
