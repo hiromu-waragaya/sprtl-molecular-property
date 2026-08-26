@@ -67,3 +67,7 @@ python run_sprtl.py \
 
 Hiromu Waragaya  
 [chlorine017@stu.kanazawa-u.ac.jp](mailto:chlorine017@stu.kanazawa-u.ac.jp)
+
+## License
+
+All rights reserved, 2026. Created by Hiromu Waragaya.
