@@ -1,4 +1,4 @@
-# Environment used for the paper runs (conda env name: gpu_test).
+# Environment used for the paper runs (conda env name: sprtl).
 # PyTorch Geometric wheels are CUDA-specific; after creating this env,
 # install the pyg stack to match the versions below if conda cannot resolve them.
 #

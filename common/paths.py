@@ -1,10 +1,5 @@
 # -*- coding: utf-8 -*-
-"""パス解決ユーティリティ。
-
-プロジェクトルートは本ファイル（common/paths.py）の親の親
-= 260519_Paper_Summary/ となるように定義する。
-環境変数で上書きしたいケース（CI / 検証 / 別環境）にも対応する。
-"""
+"""Path helpers. Override with QM9_CSV_PATH, TRANSFER_PARAMS_ROOT, SHARED_SPLITS_ROOT."""
 from __future__ import annotations
 
 import os
@@ -40,7 +35,6 @@ def resolve_shared_splits_root() -> Path:
 
 
 def _resolve_conda_prefix() -> str | None:
-    """CONDA_PREFIX または conda 配下の python 実行ファイルから環境ルートを推定。"""
     pfx = os.environ.get("CONDA_PREFIX")
     if pfx:
         return pfx
@@ -54,10 +48,7 @@ def _resolve_conda_prefix() -> str | None:
 
 
 def bootstrap_conda_libstdcxx() -> None:
-    """RHEL/EL 等で libstdc++ / GLIBCXX 不整合が起きないよう、
-    Conda の `lib` を LD_LIBRARY_PATH の先頭に追加し、`libstdc++.so.6`
-    を `RTLD_GLOBAL` でロードする。1_Training_SourceModel に倣う。
-    """
+    """Prepend conda libstdc++ so GLIBCXX matches the env on older hosts."""
     pfx = _resolve_conda_prefix()
     if not pfx:
         return

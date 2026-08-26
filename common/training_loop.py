@@ -1,14 +1,5 @@
 # -*- coding: utf-8 -*-
-"""学習ループ共通実装。
-
-General GCN / Finetuning / SoftTransfer のいずれもここで定義された
-`train_one_epoch` / `evaluate` / `fit_model` を経由するため、
-モデル間の数値挙動を「初期重み」「optimizer のパラメータ集合」「lamb の値」
-の 3 点だけに集約できる。
-
-特に Soft Transfer (lamb=0) のとき、`train_one_epoch` の loss 計算は
-General と完全に同一 (= MSE(model(data), y.unsqueeze(1))) になる。
-"""
+"""Training and evaluation loop."""
 from __future__ import annotations
 
 import json
@@ -33,10 +24,6 @@ def train_one_epoch(
     lamb: float = 0.0,
     sharing_scope: str = "weight_all",
 ) -> float:
-    """1 epoch の学習。返り値は loss_all / num_batches。
-
-    set_seeds の密な呼び出しは参考実装の数値再現性のためにそのまま踏襲。
-    """
     model.train()
     set_seeds(seed_num)
     loss_all = 0.0
@@ -51,7 +38,6 @@ def train_one_epoch(
         set_seeds(seed_num)
         loss = F.mse_loss(pred, data.y.unsqueeze(1))
         if lamb > 0:
-            # Soft sharing 項は DualTaskModel 限定。
             if not (hasattr(model, "main_block") and hasattr(model, "aux_block")):
                 raise RuntimeError(
                     "lamb > 0 requires a DualTaskModel with main_block / aux_block."
@@ -80,10 +66,6 @@ def evaluate(
     seed_num: int,
     device: torch.device,
 ) -> Tuple[np.ndarray, np.ndarray, float]:
-    """評価。targets, preds, R2 (バッチ平均) を返す。
-
-    参考実装の `test(loader, seed_num)` と同等。
-    """
     model.eval()
     set_seeds(seed_num)
     preds = []
@@ -131,20 +113,6 @@ def fit_model(
     log_prefix: str = "",
     log_every: int = 10,
 ) -> Tuple[dict, dict]:
-    """学習ループ全体の高レベルラッパー。
-
-    Returns:
-        history: dict of per-epoch metrics (list 形式)
-        summary: dict (best_train_mae / best_test_mae / best_test_epoch)
-
-    Note:
-        `log_every` は **stdout への進捗 print の間引き間隔** のみを制御する
-        (人間向け表示)。epoch ごとの train/test 性能を保持する
-        `metrics.jsonl` への書き込み・best 選択・state 保存は、間引きとは
-        無関係に **毎 epoch** 実行される (永続データは欠落しない)。
-        epoch==1 / epoch==epochs / epoch%log_every==0 のときに print する。
-        log_every<=1 のときは全 epoch を print (従来挙動)。
-    """
     train_seed_list = make_loader_seed(42, epochs)
     test_seed_list = make_loader_seed(43, epochs)
 
@@ -197,8 +165,6 @@ def fit_model(
         ) * norm_std
         train_mae = float(train_mae_t.detach().cpu().item())
 
-        # 参考実装にあわせ、test 評価前にも seed をリセット (実害はないが
-        # 三モデル間の数値挙動を完全に揃えるための保険)
         set_seeds(test_seed)
         y_test, y_test_pred, test_r2 = evaluate(
             model, test_loader, test_seed, device

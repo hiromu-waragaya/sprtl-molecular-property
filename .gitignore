@@ -10,10 +10,11 @@ data/*.csv
 data/*.csv.gz
 data/*.zip
 
-# Verification / local training outputs (published gold lives under results/alpha_from_gap/)
+# ignore local training dumps (published gold lives under results/alpha_from_gap/)
 _verify/
 results/_verify*/
 results/alpha_soft_gap/
+results/*_sprtl_*/
 
 # Editor / OS
 .DS_Store

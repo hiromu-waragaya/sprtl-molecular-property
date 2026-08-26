@@ -1,27 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Soft Transfer 学習スクリプト。
 
-設計上の最重要ポイント:
-1. DualTaskModel.forward は main_block の出力のみを返す (B, 1)。
-   aux_block は forward 経路から完全に切り離されており、Source 重みの
-   「参照テーブル」としてのみ存在する。
-2. 損失は MSE(main_pred, y) + lamb * soft_sharing_loss。
-   aux 値は y に含めない、aux_loss は計算しない。
-3. λ=0 のとき: soft_sharing 項が無効化され、損失は SingleTaskModel と
-   完全に同一。main_block の初期重みも SingleTaskModel.block と
-   (同一 seed 直後構築なら) 一致するため、Soft(λ=0) と General GCN は
-   epoch 単位で完全一致する (検証 A)。
-4. λ=0 では aux_block の重みが forward と loss どちらにも影響しないため、
-   auxi を alpha→zpve→... のように変えても main 側の挙動は不変
-   (検証 B)。
-
-各 λ について「モデル再構築 → aux 重み読込・凍結 → fit」を行い、
-λ 単位の学習結果を保存する。
-
-環境変数:
-  QM9_CSV_PATH, SHARED_SPLITS_ROOT, TRANSFER_PARAMS_ROOT
-  SMOKE_TEST=1            : epochs=3、lambdas=[0.0, 0.01] (CLI 未指定時)
-"""
 from __future__ import annotations
 
 import argparse
@@ -71,8 +49,6 @@ DEFAULT_LR = 0.01
 DEFAULT_SHARING_SCOPE = "weight_no_output"
 
 
-# 参考実装 99_Sample_Implemention/SoftTransfer/soft_transfer_train.py の
-# DEFAULT_LAMBDA_LIST に λ=0 を先頭に追加したフルグリッド。
 DEFAULT_LAMBDA_LIST_FULL: List[float] = [
     0.0,
     0.000000001, 0.00000001, 0.0000001, 0.0000002, 0.0000003, 0.0000004, 0.0000005,
@@ -86,8 +62,6 @@ DEFAULT_LAMBDA_LIST_FULL: List[float] = [
 ]
 
 
-# Round 2 診断を踏まえた本番用 λ グリッド。
-# 低 λ と高 λ の transfer degree 飽和域を粗くし、有望な 0.016-0.03 周辺は密に残す。
 DEFAULT_LAMBDA_LIST_REDUCED_FULL: List[float] = [
     0.0,
     0.00000001, 0.0000001, 0.0000005, 0.000001, 0.000005, 0.00001,
@@ -106,23 +80,23 @@ DEFAULT_LAMBDA_LIST_REDUCED_FULL: List[float] = [
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(
-        description="Soft Transfer training (full-grid lambdas, frozen aux Source)."
+        description="SPRTL training (full-grid lambdas, frozen aux Source)."
     )
     p.add_argument(
         "--seed", dest="seeds", type=int, action="append", required=True,
-        help="実験乱数シード (複数指定可)",
+        help="Random seed (repeatable)",
     )
     p.add_argument(
         "--main-prop", dest="main_props", type=str, action="append", required=True,
-        help="ターゲット物性 (複数指定可)",
+        help="Target property (repeatable)",
     )
     p.add_argument(
         "--auxi", dest="auxis", type=str, action="append", required=True,
-        help="Source 物性 (複数指定可)",
+        help="Source property (repeatable)",
     )
     p.add_argument(
         "--lambda", dest="lambdas", type=float, action="append", default=None,
-        help="λ 値 (複数指定可。未指定時はフルグリッド、SMOKE_TEST=1 では [0, 0.01])",
+        help="Lambda (repeatable). Default: full grid; SMOKE_TEST=1 uses [0, 0.01]",
     )
     p.add_argument("--train-datasize", type=int, default=200)
     p.add_argument("--epochs", type=int, default=150)
@@ -136,26 +110,26 @@ def parse_args(argv=None):
         "--sharing-scope",
         default=DEFAULT_SHARING_SCOPE,
         choices=sorted(SUPPORTED_SHARING_SCOPES),
-        help="Soft sharing 対象 parameter の範囲",
+        help="Which parameters are regularized",
     )
     p.add_argument(
         "--log-every",
         type=int,
         default=10,
-        help="stdout 進捗 print の間引き間隔 (metrics.jsonl は毎 epoch 記録)。1 で全 epoch。",
+        help="Print every N epochs (metrics.jsonl still logs every epoch)",
     )
     p.add_argument(
         "--lambdas-full", action="store_true",
-        help="--lambda 未指定でもフルグリッドを明示的に使う (SMOKE_TEST=1 を上書き)",
+        help="Use the full lambda grid even under SMOKE_TEST=1",
     )
     p.add_argument(
         "--lambdas-reduced-full", action="store_true",
-        help="Round 2 診断後の縮約フルグリッドを使う",
+        help="Use the reduced lambda grid",
     )
     p.add_argument(
         "--run-label",
         default=None,
-        help="Optional result namespace under Results/<target>_soft_<auxi>/",
+        help="Optional result namespace under results/<target>_sprtl_<auxi>/",
     )
     p.add_argument("--overwrite", action="store_true", help="Overwrite existing runs.")
     p.add_argument(
@@ -171,14 +145,6 @@ def _source_path(transfer_params_root: Path, auxi: str) -> Path:
 
 
 def _resolve_lambdas(args, smoke: bool) -> List[float]:
-    """λ リストを決定。
-
-    - --lambda が明示指定されていればそれを使う。
-    - --lambdas-full フラグがあればフルグリッド。
-    - --lambdas-reduced-full フラグがあれば縮約フルグリッド。
-    - 上記いずれも無く SMOKE_TEST=1 なら [0.0, 0.01]。
-    - そうでなければフルグリッド。
-    """
     if args.lambdas is not None:
         lambdas = [float(x) for x in args.lambdas]
     elif args.lambdas_full:
@@ -190,7 +156,6 @@ def _resolve_lambdas(args, smoke: bool) -> List[float]:
     else:
         lambdas = list(DEFAULT_LAMBDA_LIST_FULL)
 
-    # 重複を除き安定にソート (λ=0 は必ず含める)
     seen = set()
     uniq = []
     for x in lambdas:
@@ -204,15 +169,13 @@ def _resolve_lambdas(args, smoke: bool) -> List[float]:
 
 
 def _lambda_dir_name(lamb: float) -> str:
-    """ファイルシステムフレンドリな λ ディレクトリ名。"""
     if lamb == 0.0:
         return "lambda_0.0"
-    # 小さい λ は指数表記、大きいものは小数表記
     return f"lambda_{lamb:.12g}"
 
 
 def _result_base_dir(target: str, auxi: str, run_label: str | None) -> Path:
-    base = RESULTS_ROOT / f"{target}_soft_{auxi}"
+    base = RESULTS_ROOT / f"{target}_sprtl_{auxi}"
     if run_label:
         return base / run_label
     return base
@@ -245,7 +208,7 @@ def run_one_seed_scenario(
         raise FileNotFoundError(f"Source weights not found: {source_path}")
 
     print(
-        f"==================== soft | target={target} auxi={auxi} seed={seed} "
+        f"==================== sprtl | target={target} auxi={auxi} seed={seed} "
         f"lr={lr:g} sharing_scope={sharing_scope} (|lambdas|={len(lambdas)}) ===================="
     )
 
@@ -265,7 +228,7 @@ def run_one_seed_scenario(
         all_x, y_norm, train_idx, test_idx, seed
     )
 
-    scenario_label = f"{target}_soft_{auxi}"
+    scenario_label = f"{target}_sprtl_{auxi}"
     seed_dir = _result_base_dir(target, auxi, run_label) / f"seed{seed}"
     seed_dir.mkdir(parents=True, exist_ok=True)
 
@@ -292,7 +255,7 @@ def run_one_seed_scenario(
         lamb_dir = seed_dir / _lambda_dir_name(lamb)
         summary_path = lamb_dir / "summary.json"
         if summary_path.is_file() and skip_existing and not overwrite:
-            print(f"[soft/{target}<-{auxi}/s{seed}/lamb={lamb}] skip existing summary")
+            print(f"[sprtl/{target}<-{auxi}/s{seed}/lamb={lamb}] skip existing summary")
             with open(summary_path, "r", encoding="utf-8") as f:
                 existing = json.load(f)
             records.append(
@@ -315,8 +278,6 @@ def run_one_seed_scenario(
         lamb_dir.mkdir(parents=True, exist_ok=True)
         state_dir.mkdir(parents=True, exist_ok=True)
 
-        # モデルを再構築。set_seeds(seed) 直後に DualTaskModel() を構築すれば
-        # main_block の初期重みは SingleTaskModel.block と完全一致する (検証 A の前提)。
         set_seeds(seed)
         model = DualTaskModel().to(device)
         source_state = torch.load(str(source_path), map_location=device)
@@ -348,7 +309,7 @@ def run_one_seed_scenario(
             state_save_dir=state_dir,
             state_filename_prefix=f"lamb{lamb}",
             metrics_jsonl_path=lamb_dir / "metrics.jsonl",
-            log_prefix=f"[soft/{target}<-{auxi}/s{seed}/lamb={lamb}] ",
+            log_prefix=f"[sprtl/{target}<-{auxi}/s{seed}/lamb={lamb}] ",
             log_every=log_every,
         )
 
@@ -377,7 +338,7 @@ def run_one_seed_scenario(
         with open(lamb_dir / "summary.json", "w", encoding="utf-8") as f:
             json.dump(
                 {
-                    "model": "soft_transfer",
+                    "model": "sprtl",
                     "target": target,
                     "auxi": auxi,
                     "seed": int(seed),
@@ -395,17 +356,16 @@ def run_one_seed_scenario(
                 indent=2,
             )
         print(
-            f"[soft/{target}<-{auxi}/s{seed}/lamb={lamb}] BEST "
+            f"[sprtl/{target}<-{auxi}/s{seed}/lamb={lamb}] BEST "
             f"train_mae={summary['best_train_mae']:.6f} "
             f"test_mae={summary['best_test_mae']:.6f} "
             f"epoch={best_epoch} td={td_at_best} td_scope={td_shared_at_best}"
         )
 
-    # seed 横断: λ 一覧の summary
     with open(seed_dir / "lambda_summary.json", "w", encoding="utf-8") as f:
         json.dump(
             {
-                "model": "soft_transfer",
+                "model": "sprtl",
                 "target": target,
                 "auxi": auxi,
                 "seed": int(seed),
@@ -428,13 +388,13 @@ def main(argv=None):
     smoke = os.environ.get("SMOKE_TEST") == "1"
     if smoke:
         epochs = 3
-        print("[soft] SMOKE_TEST=1 -> epochs=3")
+        print("[sprtl] SMOKE_TEST=1 -> epochs=3")
     else:
         epochs = args.epochs
 
     lambdas = _resolve_lambdas(args, smoke)
-    print(f"[soft] |lambdas|={len(lambdas)}; first={lambdas[:3]} last={lambdas[-3:]}")
-    print(f"[soft] lr={args.lr:g}; sharing_scope={args.sharing_scope}")
+    print(f"[sprtl] |lambdas|={len(lambdas)}; first={lambdas[:3]} last={lambdas[-3:]}")
+    print(f"[sprtl] lr={args.lr:g}; sharing_scope={args.sharing_scope}")
 
     csv_path = resolve_qm9_csv()
     splits_root = resolve_shared_splits_root()
@@ -448,14 +408,14 @@ def main(argv=None):
         )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[soft] device={device}")
+    print(f"[sprtl] device={device}")
 
     valid_df, all_x = load_qm9(csv_path)
 
     for target in args.main_props:
         for auxi in args.auxis:
             if target == auxi:
-                print(f"[soft] skip target==auxi: {target}")
+                print(f"[sprtl] skip target==auxi: {target}")
                 continue
             for seed in args.seeds:
                 run_one_seed_scenario(
@@ -478,7 +438,7 @@ def main(argv=None):
                     log_every=int(args.log_every),
                 )
 
-    print("[soft] Complete!")
+    print("[sprtl] Complete!")
 
 
 if __name__ == "__main__":

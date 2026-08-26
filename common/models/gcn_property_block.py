@@ -1,20 +1,5 @@
 # -*- coding: utf-8 -*-
-"""GCN 本体ブロック。
-
-三モデル (General / Finetuning / SoftTransfer) の **唯一の GCN 実装**。
-BatchNorm1d は完全に削除しており、Soft / Single どちらの参考実装とも
-ここで初めてアーキテクチャが厳密に同一となる。
-
-ハイパラ:
-- n_features = 75 (mol2vec の出力次元)
-- n_conv_hidden = 1 (graphconv_hidden の段数)
-- n_mlp_hidden = 1 (mlp_hidden の段数)
-- dim = 32 (隠れ次元)
-
-state_dict のキーは 1_Training_SourceModel/source_gcn_train.py 内で
-保存される Source Model (MolecularGCN) と一致するため、
-`block.load_state_dict(source_state)` で互換読み込みが可能。
-"""
+"""Shared GCN block (no BatchNorm). 75-d atoms, dim=32."""
 from __future__ import annotations
 
 import torch

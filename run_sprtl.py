@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Public entry point for SPRTL (Soft Transfer) target-task training.
+"""Public entry point for SPRTL target-task training.
 
 Loads a pretrained source GCN and trains the target task with starting-point
-regularization. Unlike ``soft_transfer_train.py``'s CLI (which prepends λ=0.0),
+regularization. Unlike ``sprtl_train.py``'s CLI (which prepends λ=0.0),
 this wrapper calls ``run_one_seed_scenario`` with a single λ.
 
-Environment variables (setdefault to this repository if unset):
-  QM9_CSV_PATH, SHARED_SPLITS_ROOT, TRANSFER_PARAMS_ROOT
 """
 from __future__ import annotations
 
@@ -57,20 +55,20 @@ def _load_flat_yaml(path: Path) -> dict:
     return out
 
 
-def _import_soft_module():
+def _import_sprtl_module():
     spec = importlib.util.spec_from_file_location(
-        "soft_transfer_train",
-        str(REPO_ROOT / "soft_transfer_train.py"),
+        "sprtl_train",
+        str(REPO_ROOT / "sprtl_train.py"),
     )
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["soft_transfer_train"] = mod
+    sys.modules["sprtl_train"] = mod
     spec.loader.exec_module(mod)
     return mod
 
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(
-        description="SPRTL / Soft Transfer: train a target property from a frozen source GCN."
+        description="SPRTL: train a target property from a frozen source GCN."
     )
     p.add_argument("--config", type=str, default=None, help="Flat YAML config (see configs/).")
     p.add_argument("--seed", type=int, default=None)
@@ -168,8 +166,8 @@ def main(argv=None):
 
     valid_df, all_x = load_qm9(csv_path)
 
-    soft_mod = _import_soft_module()
-    records = soft_mod.run_one_seed_scenario(
+    sprtl_mod = _import_sprtl_module()
+    records = sprtl_mod.run_one_seed_scenario(
         target=str(target),
         auxi=str(auxi),
         seed=int(seed),

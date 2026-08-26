@@ -4,7 +4,7 @@ Author implementation for the paper:
 
 **Starting-Point Regularized Transfer Learning for Molecular Property Prediction: Mitigating Negative Transfer in Low-Data Regimes**
 
-This repository contains the minimum needed to run SPRTL (Soft Transfer in the source code) on a target property using a pretrained source model, plus the representative numerical result.
+This repository contains the minimum needed to run SPRTL on a target property using a pretrained source model, plus the representative numerical result.
 
 ## Paper
 
@@ -16,20 +16,9 @@ Coming soon.
 - SPRTL training code for a target property (`alpha`)
 - The representative run (`seed=42`, `lambda=0.032`) and its metrics
 
-Not included in this first release: baseline training (scratch GCN / finetuning), lambda search, and analysis scripts.
-
-## Results
-
-| Setting | test MAE |
-|---------|----------|
-| SPRTL, alpha <- gap, seed 42, lambda=0.032 | 1.623 |
-| SPRTL, alpha <- gap, 10-seed mean ± std (paper) | 1.651 ± 0.113 |
-
-The files under `results/` are from the paper production run, not from a later re-run. On GPU, a fresh 20-epoch check of this code matched those curves to about `1e-6` in MAE (a few float32 ULPs). Bit-identical re-runs are not expected.
-
 ## Requirements
 
-See `environment.yml`. The paper numbers were produced with conda env `gpu_test` (Python 3.9, PyTorch 2.0.1+cu118, PyG 2.3.1, RDKit 2023.03.2).
+See `environment.yml`. The paper numbers were produced with conda env `sprtl` (Python 3.9, PyTorch 2.0.1+cu118, PyG 2.3.1, RDKit 2023.03.2).
 
 ## Installation
 
@@ -65,7 +54,7 @@ python run_sprtl.py \
 ```text
 .
 ├── run_sprtl.py
-├── soft_transfer_train.py
+├── sprtl_train.py
 ├── common/
 ├── configs/alpha_from_gap.yaml
 ├── pretrained/gap_source_model_state.pth
@@ -74,12 +63,7 @@ python run_sprtl.py \
 └── results/alpha_from_gap/seed42/
 ```
 
-In this codebase, **Soft Transfer** is the implementation name of **SPRTL**.
+## Contact
 
-## Citation
-
-Coming soon.
-
-## License
-
-To be confirmed before the first public push.
+Hiromu Waragaya  
+[chlorine017@stu.kanazawa-u.ac.jp](mailto:chlorine017@stu.kanazawa-u.ac.jp)

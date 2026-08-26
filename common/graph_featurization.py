@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-"""SMILES / RDKit Mol -> PyG Data（Sinple_GCN/single_gcn_train.py と同一ロジック）。"""
 from __future__ import annotations
 
 import numpy as np
@@ -131,7 +130,6 @@ def get_bond_pair(mol):
 
 
 def mol2vec(mol):
-    """参考 single_gcn_train.py と同一のグラフ構築（結合なし分子も扱う）。"""
     atoms = mol.GetAtoms()
     bonds = mol.GetBonds()
     node_f = [atom_features(atom) for atom in atoms]

@@ -1,5 +1,5 @@
 {
-  "model": "soft_transfer",
+  "model": "sprtl",
   "target": "alpha",
   "auxi": "gap",
   "seed": 42,

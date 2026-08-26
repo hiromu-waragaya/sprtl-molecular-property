@@ -1,15 +1,4 @@
 # -*- coding: utf-8 -*-
-"""データロード・分割・正規化・Loader 構築の共通実装。
-
-三モデルすべて同一の前処理経路を通すことが、研究上の妥当な比較の前提。
-
-- CSV: ms932 / カンマ区切り (Source Model と整合)。
-- 無効 SMILES があれば除外（valid_df を返す）。
-- 分割: torch.utils.data.random_split を用い、`seed` で完全固定。
-- 正規化: **train 200 のみ** で z-score を計算（情報リーク防止）。
-- y attach: 各 PyG.Data の `.y` に target 値 (shape (1,)) を貼り付ける。
-- DataLoader: train/test とも `drop_last=False` (200 件を全活用するため)。
-"""
 from __future__ import annotations
 
 import json
@@ -27,11 +16,7 @@ from .seeding import set_seeds
 
 
 def load_qm9(csv_path: Path) -> Tuple[pd.DataFrame, list]:
-    """QM9 CSV を読み込み、SMILES → Mol → グラフ特徴 (list of PyG.Data) に変換。
-
-    無効 SMILES は除外し、`valid_df` は連番再採番された DataFrame。
-    `all_x[i]` は `valid_df.iloc[i]` と対応する。
-    """
+    """Load QM9 CSV (ms932) and featurize valid SMILES."""
     df = pd.read_csv(str(csv_path), encoding="ms932", sep=",")
     if "smiles" not in df.columns:
         raise ValueError(f"CSV must contain 'smiles' column: {csv_path}")
@@ -58,7 +43,6 @@ def load_qm9(csv_path: Path) -> Tuple[pd.DataFrame, list]:
 
 
 def build_split(n_all: int, train_datasize: int, seed: int) -> Tuple[List[int], List[int]]:
-    """`torch.utils.data.random_split` ベースで train/test indices を生成。"""
     if train_datasize < 1 or train_datasize >= n_all:
         raise ValueError(
             f"Invalid split: n_all={n_all}, train_datasize={train_datasize}"
@@ -109,12 +93,7 @@ def get_or_build_split(
     train_datasize: int,
     seed: int,
 ) -> Tuple[List[int], List[int], Path]:
-    """`Shared_Splits/target{N}_seed{S}.json` を読み込む。
-    なければ新規に作成・保存して返す。
-
-    全モデルが同じ JSON を参照するため、(target, model) 間で
-    train_idx / test_idx が完全一致する。
-    """
+    """Load a fixed split JSON, or create one if missing."""
     splits_root.mkdir(parents=True, exist_ok=True)
     path = splits_root / f"target{train_datasize}_seed{seed}.json"
     if path.is_file():
@@ -140,7 +119,7 @@ def get_or_build_split(
 
 
 def compute_norm_params_from_train(y_raw_train: np.ndarray) -> Tuple[float, float]:
-    """train サンプルのみで z-score の mean / std を計算。"""
+    """Train-only z-score mean and std (ddof=0)."""
     arr = np.asarray(y_raw_train, dtype=float)
     mean = float(np.mean(arr))
     std = float(np.std(arr))
@@ -158,11 +137,6 @@ def attach_y_and_build_loaders(
     train_batch_size: int = 32,
     test_batch_size: int = 4096,
 ) -> Tuple[DataLoader, DataLoader]:
-    """`all_x[i].y` に正規化済み target 値を貼り付け、train/test の DataLoader を返す。
-
-    DataLoader は train/test とも `shuffle=True`, `drop_last=False`。
-    DataLoader 構築前後に `set_seeds(seed)` を入れて shuffle 順序を再現可能にする。
-    """
     set_seeds(seed)
 
     train_x = []
